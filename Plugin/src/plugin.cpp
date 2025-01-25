@@ -100,7 +100,9 @@ tinybvh::Intersection Intersect(int index, tinybvh::bvhvec3 origin, tinybvh::bvh
         tinybvh::Ray ray(origin, direction);
         if (useCWBVH && bvh->cwbvh != nullptr)
         {
+            #ifdef BVH_USEAVX
             bvh->cwbvh->Intersect(ray);
+            #endif
         }
         else 
         {
