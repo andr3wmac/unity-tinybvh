@@ -105,33 +105,33 @@ uint IntersectCWBVHNode(float3 origin, float3 invDir, uint octinv4, float tmax, 
 
 void IntersectTriangle(int triAddr, const Ray ray, inout RayHit hit)
 {
-    float3 v0 = BVHTris[triAddr].xyz;
-    float3 e1 = BVHTris[triAddr + 1].xyz - v0;
-    float3 e2 = BVHTris[triAddr + 2].xyz - v0;
+    float3 e1 = BVHTris[triAddr + 0].xyz;
+    float3 e2 = BVHTris[triAddr + 1].xyz;
+    float4 v0 = BVHTris[triAddr + 2];
     
-    float3 r = cross(ray.direction.xyz, e2);
-    float a = dot(e1, r);
+    float3 r = cross(ray.direction.xyz, e1);
+    float a = dot(e2, r);
             
     if (abs(a) > 0.0000001f)
     {
         float f = 1.0f / a;
-        float3 s = ray.origin.xyz - v0;
+        float3 s = ray.origin.xyz - v0.xyz;
         float u = f * dot(s, r);
         
         if (u >= 0.0f && u <= 1.0f)
         {
-            float3 q = cross(s, e1);
+            float3 q = cross(s, e2);
             float v = f * dot(ray.direction.xyz, q);
             
             if (v >= 0.0f && u + v <= 1.0f)
             {
-                float d = f * dot(e2, q);
+                float d = f * dot(e1, q);
                 
                 if (d > 0.0f && d < hit.t)
                 {
                     hit.t = d;
                     hit.barycentric = float2(u, v);
-                    hit.triIndex = asuint(BVHTris[triAddr].w);
+                    hit.triIndex = asuint(v0.w);
                 }
             }
         }

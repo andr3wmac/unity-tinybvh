@@ -8,8 +8,8 @@
 
 struct BVHContainer
 {
-    tinybvh::BVH8* bvh8 = nullptr;
-    tinybvh::BVH8_CWBVH* cwbvh = nullptr;
+    tinybvh::BVH4_CPU* bvh4CPU  = nullptr;
+    tinybvh::BVH8_CWBVH* cwbvh  = nullptr;
 };
 
 // Global container for BVHs and a mutex for thread safety
@@ -50,13 +50,14 @@ BVHContainer* GetBVH(int index)
 int BuildBVH(tinybvh::bvhvec4* vertices, int triangleCount, bool buildCWBVH)
 {
     BVHContainer* container = new BVHContainer();
-    container->bvh8 = new tinybvh::BVH8();
-    container->bvh8->Build(vertices, triangleCount);
+
+    container->bvh4CPU = new tinybvh::BVH4_CPU();
+    container->bvh4CPU->Build(vertices, triangleCount);
 
     if (buildCWBVH)
     {
         container->cwbvh = new tinybvh::BVH8_CWBVH();
-        container->cwbvh->ConvertFrom(*container->bvh8);
+        container->cwbvh->Build(vertices, triangleCount);
     }
     
     return AddBVH(container);
@@ -74,9 +75,9 @@ void DestroyBVH(int index)
                 delete gBVHs[index]->cwbvh;
             }
 
-            if (gBVHs[index]->bvh8 != nullptr)
+            if (gBVHs[index]->bvh4CPU != nullptr)
             {
-                delete gBVHs[index]->bvh8;
+                delete gBVHs[index]->bvh4CPU;
             }
 
             delete gBVHs[index];
@@ -103,7 +104,7 @@ tinybvh::Intersection Intersect(int index, tinybvh::bvhvec3 origin, tinybvh::bvh
         }
         else 
         {
-            bvh->bvh8->Intersect(ray);
+            bvh->bvh4CPU->Intersect(ray);
         }
         return ray.hit;
     }
