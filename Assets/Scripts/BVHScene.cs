@@ -1,9 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 using UnityEngine.Rendering;
+
+using tinybvh;
 
 public class BVHScene : MonoBehaviour
 {
@@ -21,22 +24,44 @@ public class BVHScene : MonoBehaviour
     public NativeArray<Vector4> vertexPositionBufferCPU;
     private ComputeBuffer triangleAttributesBuffer;
 
-    // BVH data
-    private tinybvh.BVH sceneBVH;
-    private bool buildingBVH = false;
-    private ComputeBuffer bvhNodes;
-    private ComputeBuffer bvhTris;
+    // TLAS and BLAS data
+    private ComputeBuffer bvhNodeBuffer;
+    private ComputeBuffer bvhTriBuffer;
+    private ComputeBuffer tlasNodeBuffer;
+    private ComputeBuffer tlasIndexBuffer;
+    private ComputeBuffer blasInstanceBuffer;
 
     // Struct sizes in bytes
     private const int VertexPositionSize = 16;
     private const int TriangleAttributeSize = 60;
     private const int BVHNodeSize = 80;
     private const int BVHTriSize = 16;
+    private const int TLASNodeSize = 64;
+    private const int TLASIndexSize = 4;
+    private const int BLASInstanceSize = 72;
+
+    class BVHMesh
+    {
+        public MeshRenderer meshRenderer;
+        public int blasOffset;
+        public int triOffset;
+        public int triCount;
+
+        public BVH bvh;
+        public bool buildingBVH = false;
+    }
+    private List<BVHMesh> bvhMeshes = new List<BVHMesh>();
+
+    struct BLASInstance
+    {
+        public Matrix4x4 invTransform;
+        public uint nodeOffset;
+        public uint triOffset;
+    }
+    private List<BLASInstance> blasInstances = new List<BLASInstance>();
 
     void Start()
     {
-        sceneBVH = new tinybvh.BVH();
-
         // Load compute shader
         meshProcessingShader   = Resources.Load<ComputeShader>("MeshProcessing");
         has32BitIndicesKeyword = meshProcessingShader.keywordSpace.FindKeyword("HAS_32_BIT_INDICES");
@@ -59,18 +84,20 @@ public class BVHScene : MonoBehaviour
             vertexPositionBufferCPU.Dispose();
         }
 
-        sceneBVH.Destroy();
-    }
-
-    public tinybvh.BVH GetBVH()
-    {
-        return sceneBVH;
+        foreach(BVHMesh mesh in bvhMeshes)
+        {
+            if (mesh.bvh != null)
+            {
+                mesh.bvh.Destroy();
+            }
+        }
     }
 
     private void ProcessMeshes()
     {
         totalVertexCount = 0;
         totalTriangleCount = 0;
+        bvhMeshes.Clear();
 
         // Gather info on the meshes we'll be using
         foreach (MeshRenderer renderer in meshRenderers)
@@ -123,7 +150,6 @@ public class BVHScene : MonoBehaviour
             meshProcessingShader.SetInt("UVOffset", uvOffset);
             meshProcessingShader.SetInt("TriangleCount", triangleCount);
             meshProcessingShader.SetInt("OutputTriangleStart", totalTriangleCount);
-            meshProcessingShader.SetMatrix("LocalToWorld", renderer.localToWorldMatrix);
 
             // Set keywords based on format/attributes of this mesh
             meshProcessingShader.SetKeyword(has32BitIndicesKeyword, (mesh.indexFormat == IndexFormat.UInt32));
@@ -131,6 +157,14 @@ public class BVHScene : MonoBehaviour
             meshProcessingShader.SetKeyword(hasUVsKeyword, mesh.HasVertexAttribute(VertexAttribute.TexCoord0));
 
             meshProcessingShader.Dispatch(0, Mathf.CeilToInt(triangleCount / 64.0f), 1, 1);
+
+            BVHMesh bvhMesh = new BVHMesh();
+            bvhMesh.meshRenderer = renderer;
+            bvhMesh.triOffset    = totalTriangleCount;
+            bvhMesh.triCount     = triangleCount;
+            bvhMesh.bvh          = new BVH();
+            bvhMesh.buildingBVH  = false;
+            bvhMeshes.Add(bvhMesh);
 
             totalTriangleCount += triangleCount;
         }
@@ -163,61 +197,162 @@ public class BVHScene : MonoBehaviour
             var dataPointer = (IntPtr)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(vertexPositionBufferCPU);
         #endif
         
-        // Build BVH in thread.
+        // Build BVHs in thread.
+        // Note: Should build each BVH on separate threads.
         Thread thread = new Thread(() =>
         {
             DateTime bvhStartTime = DateTime.UtcNow;
-            sceneBVH.Build(dataPointer, totalTriangleCount, true);
+
+            foreach (BVHMesh mesh in bvhMeshes)
+            {
+                mesh.bvh.Build(dataPointer, mesh.triOffset, mesh.triCount, true);
+                mesh.buildingBVH = true;
+            }
+
             TimeSpan bvhTime = DateTime.UtcNow - bvhStartTime;
 
-            Debug.Log("BVH built in: " + bvhTime.TotalMilliseconds + "ms");
+            Debug.Log(bvhMeshes.Count + " BVH(s) built in: " + bvhTime.TotalMilliseconds + "ms");
 
             #if UNITY_EDITOR
                 persistentBuffer.Dispose();
             #endif
         });
 
-        buildingBVH = true;
         thread.Start();
     }
 
     private void Update()
     {
-        if (buildingBVH && sceneBVH.IsReady())
+        // Ensure all the BLAS BVHs are prepared.
+        if (!PrepareBVHBuffers())
         {
-            // Get the sizes of the arrays
-            int nodesSize = sceneBVH.GetCWBVHNodesSize();
-            int trisSize = sceneBVH.GetCWBVHTrisSize();
+            return;
+        }
+
+        // Update transforms
+        foreach (BVHMesh mesh in bvhMeshes)
+        {
+            mesh.bvh.UpdateTransform(mesh.meshRenderer.transform.localToWorldMatrix.transpose);
+        }
+        Utilities.PrepareBuffer(ref blasInstanceBuffer, blasInstances.Count, BLASInstanceSize);
+        blasInstanceBuffer.SetData(blasInstances.ToArray());
+
+        // Rebuild TLAS
+        if (TLAS.BuildTLAS())
+        {
+            int nodesSize = TLAS.GetTLASNodesSize();
+            int indicesSize = TLAS.GetTLASIndicesSize();
+
+            IntPtr nodesPtr, indicesPtr;
+            if (TLAS.GetTLASData(out nodesPtr, out indicesPtr))
+            {
+                Utilities.UploadFromPointer(ref tlasNodeBuffer, nodesPtr, nodesSize, TLASNodeSize);
+                Utilities.UploadFromPointer(ref tlasIndexBuffer, indicesPtr, indicesSize, TLASIndexSize);
+            } 
+            else
+            {
+                Debug.LogError("Failed to fetch updated TLAS data.");
+            }
+
+            //Debug.Log("REBUILD TLAS! Nodes: " + nodesSize + " Indices: " + indicesSize);
+        } 
+        else 
+        {
+            Debug.LogError("Failed to build TLAS.");
+        }
+    }
+
+    private bool PrepareBVHBuffers()
+    {
+        int totalNodeCount = 0;
+        int totalTriCount = 0;
+
+        bool allMeshesReasty = true;
+
+        foreach (BVHMesh mesh in bvhMeshes)
+        {
+            if (mesh.bvh.IsReady())
+            {
+                totalNodeCount += mesh.bvh.GetCWBVHNodesSize() / BVHNodeSize;
+                totalTriCount += mesh.bvh.GetCWBVHTrisSize() / BVHTriSize;
+                mesh.buildingBVH = false;
+            } 
+            else 
+            {
+                allMeshesReasty = false;
+            }
+        }
+
+        if (!allMeshesReasty)
+        {
+            return false;
+        }
+
+        blasInstances.Clear();
+
+        Utilities.PrepareBuffer(ref bvhNodeBuffer, totalNodeCount, BVHNodeSize, ComputeBufferMode.SubUpdates);
+        Utilities.PrepareBuffer(ref bvhTriBuffer, totalTriCount, BVHTriSize, ComputeBufferMode.SubUpdates);
+
+        int dstNode = 0;
+        int dstTris = 0;
+
+        foreach (BVHMesh mesh in bvhMeshes)
+        {
+            int nodesSize = mesh.bvh.GetCWBVHNodesSize();
+            int trisSize = mesh.bvh.GetCWBVHTrisSize();
 
             IntPtr nodesPtr, trisPtr;
-            if (sceneBVH.GetCWBVHData(out nodesPtr, out trisPtr))
+            if (mesh.bvh.GetCWBVHData(out nodesPtr, out trisPtr))
             {
-                Utilities.UploadFromPointer(ref bvhNodes, nodesPtr, nodesSize, BVHNodeSize);
-                Utilities.UploadFromPointer(ref bvhTris, trisPtr, trisSize, BVHTriSize);
+                Utilities.UploadFromPointer(ref bvhNodeBuffer, nodesPtr, nodesSize, BVHNodeSize, dstNode);
+                Utilities.UploadFromPointer(ref bvhTriBuffer, trisPtr, trisSize, BVHTriSize, dstTris);
             } 
             else
             {
                 Debug.LogError("Failed to fetch updated BVH data.");
             }
 
-            buildingBVH = false;
+            BLASInstance blasInstance = new BLASInstance();
+            blasInstance.invTransform = mesh.meshRenderer.transform.worldToLocalMatrix;
+            blasInstance.nodeOffset = (uint)dstNode;
+            blasInstance.triOffset = (uint)dstTris;
+            blasInstances.Add(blasInstance);
+
+            dstNode += nodesSize / BVHNodeSize;
+            dstTris += trisSize / BVHTriSize;
         }
+
+        return true;
     }
 
     public bool CanRender()
     {
-        return (bvhNodes != null && bvhTris != null);
+        return (tlasNodeBuffer != null || tlasIndexBuffer != null || 
+                bvhNodeBuffer != null && bvhTriBuffer != null ||
+                triangleAttributesBuffer != null);
     }
 
     public void PrepareShader(CommandBuffer cmd, ComputeShader shader, int kernelIndex)
     {
-        if (bvhNodes == null || bvhTris == null || triangleAttributesBuffer == null)
+        if (!CanRender())
         {
             return;
         }
 
-        cmd.SetComputeBufferParam(shader, kernelIndex, "BVHNodes", bvhNodes);
-        cmd.SetComputeBufferParam(shader, kernelIndex, "BVHTris", bvhTris);
+        cmd.SetComputeBufferParam(shader, kernelIndex, "TLASNodes", tlasNodeBuffer);
+        cmd.SetComputeBufferParam(shader, kernelIndex, "TLASIndices", tlasIndexBuffer);
+        cmd.SetComputeBufferParam(shader, kernelIndex, "BLASInstances", blasInstanceBuffer);
+        cmd.SetComputeBufferParam(shader, kernelIndex, "BVHNodes", bvhNodeBuffer);
+        cmd.SetComputeBufferParam(shader, kernelIndex, "BVHTris", bvhTriBuffer);
         cmd.SetComputeBufferParam(shader, kernelIndex, "TriangleAttributesBuffer", triangleAttributesBuffer);
+    }
+
+    public BVH.Intersection Intersect(Vector3 origin, Vector3 direction, bool useCWBVH = false)
+    {
+        BVH.Intersection tlasIntersection = TLAS.Intersect(origin, direction);
+
+        Debug.Log("TLAS Intersection: " + tlasIntersection.prim + " Dist: " + tlasIntersection.t);
+
+        return new BVH.Intersection();
     }
 }

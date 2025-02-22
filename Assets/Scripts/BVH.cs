@@ -16,7 +16,7 @@ namespace tinybvh
         }
 
         [DllImport("unity-tinybvh-plugin", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int BuildBVH(IntPtr verticesPtr, int count, bool buildCWBVH);
+        private static extern int BuildBVH(IntPtr verticesPtr, int startTri, int triCount, bool buildCWBVH);
 
         [DllImport("unity-tinybvh-plugin", CallingConvention = CallingConvention.Cdecl)]
         private static extern void DestroyBVH(int index);
@@ -36,19 +36,22 @@ namespace tinybvh
         [DllImport("unity-tinybvh-plugin", CallingConvention = CallingConvention.Cdecl)]
         private static extern bool GetCWBVHData(int index, out IntPtr bvhNodes, out IntPtr bvhTris);
 
+        [DllImport("unity-tinybvh-plugin", CallingConvention = CallingConvention.Cdecl)]
+        public static extern void UpdateTransform(int index, Matrix4x4 transform);
+
         // Index of the BVH internal to the plugin.
         private int index = -1;
 
         // Construct a new BVH from the given vertices.
         // Set buildCWBVH to true if this is intended for GPU traversal.
-        public void Build(IntPtr verticesPtr, int count, bool buildCWBVH = false)
+        public void Build(IntPtr verticesPtr, int startTri, int triCount, bool buildCWBVH = false)
         {
             if (index >= 0)
             {
                 Destroy();
             }
 
-            index = BuildBVH(verticesPtr, count, buildCWBVH);
+            index = BuildBVH(verticesPtr, startTri, triCount, buildCWBVH);
         }
 
         // Frees the memory of the BVH in the plugin.
@@ -98,6 +101,12 @@ namespace tinybvh
             }
 
             return GetCWBVHData(index, out bvhNodes, out bvhTris);
+        }
+
+        public void UpdateTransform(Matrix4x4 transform)
+        {
+            if (index < 0) return;
+            UpdateTransform(index, transform);
         }
     }
 }

@@ -15,7 +15,6 @@ uint UVOffset;
 
 uint TriangleCount; 
 uint OutputTriangleStart;
-float4x4 LocalToWorld;
 
 RWStructuredBuffer<float4> VertexPositionBuffer;
 
@@ -71,11 +70,6 @@ void ProcessMesh(uint3 id : SV_DispatchThreadID)
     float3 vert1 = ReadVertexPosition(vertIndices.y);
     float3 vert2 = ReadVertexPosition(vertIndices.z);
     
-    // Transform vertex positions to world space
-    vert0 = mul(LocalToWorld, float4(vert0.xyz, 1)).xyz;
-    vert1 = mul(LocalToWorld, float4(vert1.xyz, 1)).xyz;
-    vert2 = mul(LocalToWorld, float4(vert2.xyz, 1)).xyz;
-    
     // Write vertex positions into buffer
     int writeTriIndex = OutputTriangleStart + triIndex;
     VertexPositionBuffer[(writeTriIndex * 3) + 0] = float4(vert0.xyz, 0);
@@ -88,11 +82,6 @@ void ProcessMesh(uint3 id : SV_DispatchThreadID)
         attr.normal0 = ReadVertexNormal(vertIndices.x);
         attr.normal1 = ReadVertexNormal(vertIndices.y);
         attr.normal2 = ReadVertexNormal(vertIndices.z);
-    
-        // Transform normals to world space
-        attr.normal0 = mul(LocalToWorld, float4(attr.normal0.xyz, 0)).xyz;
-        attr.normal1 = mul(LocalToWorld, float4(attr.normal1.xyz, 0)).xyz;
-        attr.normal2 = mul(LocalToWorld, float4(attr.normal2.xyz, 0)).xyz;
     #endif
 
     #if HAS_UVS

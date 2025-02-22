@@ -91,7 +91,7 @@ public class Raytracer : MonoBehaviour
 
     private void OnRenderImage(RenderTexture source, RenderTexture destination)
     {
-        if (bvhScene == null || !bvhScene.CanRender())
+        //if (bvhScene == null || !bvhScene.CanRender())
         {
             Graphics.Blit(source, destination);
             return;
@@ -176,8 +176,7 @@ public class Raytracer : MonoBehaviour
         Vector3 pos = sourceCamera.transform.position;
         Vector3 dir = sourceCamera.transform.forward;
 
-        tinybvh.BVH bvh = bvhScene.GetBVH();
-        tinybvh.BVH.Intersection intersection = bvh.Intersect(pos, dir, false);
+        tinybvh.BVH.Intersection intersection = bvhScene.Intersect(pos, dir, false);
 
         Debug.Log("Ray Hit Distance: " + intersection.t + ", Triangle Index: " + intersection.prim);
         Debug.DrawLine(pos, pos + (dir * intersection.t), Color.red, 10.0f);
@@ -233,8 +232,6 @@ public class Raytracer : MonoBehaviour
         Matrix4x4 CamInvProj = sourceCamera.projectionMatrix.inverse;
         Matrix4x4 CamToWorld = sourceCamera.cameraToWorldMatrix;
 
-        tinybvh.BVH bvh = bvhScene.GetBVH();
-        
         for (int y = 0; y < outputHeight; y++)
         {
             for (int x = 0; x < outputWidth; x++)
@@ -251,7 +248,7 @@ public class Raytracer : MonoBehaviour
                 Vector3 direction = new Vector3(viewSpacePos.x, viewSpacePos.y, viewSpacePos.z).normalized;
                 direction = CamToWorld.MultiplyVector(direction).normalized;
 
-                tinybvh.BVH.Intersection intersection = bvh.Intersect(origin, direction, false);
+                tinybvh.BVH.Intersection intersection = bvhScene.Intersect(origin, direction, false);
                 if (intersection.t < sourceCamera.farClipPlane)
                 {
                     float dist = 1.0f - (intersection.t / 100.0f);
