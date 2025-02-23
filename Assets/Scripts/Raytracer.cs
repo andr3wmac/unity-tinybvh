@@ -45,7 +45,7 @@ public class Raytracer : MonoBehaviour
 
     // Struct sizes in bytes
     private const int RayStructSize = 24;
-    private const int RayHitStructSize = 20;
+    private const int RayHitStructSize = 24;
 
     void Start()
     {
@@ -180,7 +180,6 @@ public class Raytracer : MonoBehaviour
         if (intersection.t < sourceCamera.farClipPlane)
         {
             BVHScene.BVHMesh mesh = bvhScene.GetMesh((int)intersection.inst);
-
             Debug.Log("Ray Hit: " + mesh.meshRenderer.name + "(" + intersection.inst + "). Distance: " + intersection.t + ", Triangle Index: " + intersection.prim);
             Debug.DrawLine(pos, pos + (dir * intersection.t), Color.red, 10.0f);
         } 
@@ -224,9 +223,18 @@ public class Raytracer : MonoBehaviour
         // Read back hit
         Utilities.DebugRayHit[] debugRayHits = new Utilities.DebugRayHit[1];
         debugRayHitBuffer.GetData(debugRayHits);
+        Utilities.DebugRayHit hit = debugRayHits[0];
 
-        Debug.Log("Ray Hit Distance: " + debugRayHits[0].t + ", Triangle Index: " + debugRayHits[0].triIndex);
-        Debug.DrawLine(pos, pos + (dir * debugRayHits[0].t), Color.red, 10.0f);
+        if (hit.t < sourceCamera.farClipPlane)
+        {
+            BVHScene.BVHMesh mesh = bvhScene.GetMesh((int)hit.instIndex);
+            Debug.Log("Ray Hit: " + mesh.meshRenderer.name + "(" + hit.instIndex + "). Distance: " + hit.t + ", Triangle Index: " + hit.triIndex);
+            Debug.DrawLine(pos, pos + (dir * hit.t), Color.red, 10.0f);
+        } 
+        else
+        {
+            Debug.Log("Ray did not hit anything.");
+        }
 
         debugRayBuffer.Release();
         debugRayHitBuffer.Release();

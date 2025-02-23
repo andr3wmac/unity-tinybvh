@@ -19,6 +19,7 @@ extern "C"
     extern PLUGIN_FN bool GetCWBVHData(int index, tinybvh::bvhvec4** bvhNodes, tinybvh::bvhvec4** bvhTris);
 
     extern PLUGIN_FN bool BuildTLAS();
+    extern PLUGIN_FN void DestroyTLAS();
     extern PLUGIN_FN int GetTLASNodesSize();
     extern PLUGIN_FN int GetTLASIndicesSize();
     extern PLUGIN_FN bool GetTLASData(tinybvh::BVH_GPU::BVHNode** bvhNodes, uint32_t** bvhIndices);

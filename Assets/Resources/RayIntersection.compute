@@ -274,6 +274,7 @@ RayHit CastRayTLAS(const Ray ray)
 				{
 					hit = cwbvhHit;
                     hit.triIndex = inst.triOffset + hit.triIndex;
+                    hit.instIndex = instIdx;
                 }
             }
             if (stackPtr == 0)

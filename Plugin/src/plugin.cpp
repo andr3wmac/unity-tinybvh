@@ -210,6 +210,25 @@ bool BuildTLAS()
     return true;
 }
 
+void DestroyTLAS()
+{
+    gBLASInstances.clear();
+    gBLASList.clear();
+    gBLASListGPU.clear();
+    
+    if (gTLAS != nullptr)
+    {
+        delete gTLAS;
+        gTLAS = nullptr;
+    }
+
+    if (gTLASGPU != nullptr)
+    {
+        delete gTLASGPU;
+        gTLASGPU = nullptr;
+    }
+}
+
 int GetTLASNodesSize()
 {
     if (gTLASGPU == nullptr)

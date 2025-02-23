@@ -17,6 +17,7 @@ public static class Utilities
         public float t;
         public Vector2 barycentric;
         public uint triIndex;
+        public uint instIndex;
         public uint steps;
     };
 

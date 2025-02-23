@@ -8,6 +8,9 @@ namespace tinybvh
     {
         [DllImport("unity-tinybvh-plugin", CallingConvention = CallingConvention.Cdecl)]
         public static extern bool BuildTLAS();
+
+        [DllImport("unity-tinybvh-plugin", CallingConvention = CallingConvention.Cdecl)]
+        public static extern bool DestroyTLAS();
         
         [DllImport("unity-tinybvh-plugin", CallingConvention = CallingConvention.Cdecl)]
         public static extern int GetTLASNodesSize();

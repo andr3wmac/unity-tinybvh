@@ -16,12 +16,12 @@ public class BVHScene : MonoBehaviour
     private LocalKeyword hasNormalsKeyword;
     private LocalKeyword hasUVsKeyword;
 
-    private int totalVertexCount = 0;
+    private int totalVertexCount   = 0;
     private int totalTriangleCount = 0;
     private DateTime readbackStartTime;
 
-    public ComputeBuffer vertexPositionBufferGPU;
-    public NativeArray<Vector4> vertexPositionBufferCPU;
+    private ComputeBuffer vertexPositionBufferGPU;
+    private NativeArray<Vector4> vertexPositionBufferCPU;
     private ComputeBuffer triangleAttributesBuffer;
 
     // TLAS and BLAS data
@@ -32,23 +32,21 @@ public class BVHScene : MonoBehaviour
     private ComputeBuffer blasInstanceBuffer;
 
     // Struct sizes in bytes
-    private const int VertexPositionSize = 16;
+    private const int VertexPositionSize    = 16;
     private const int TriangleAttributeSize = 60;
-    private const int BVHNodeSize = 80;
-    private const int BVHTriSize = 16;
-    private const int TLASNodeSize = 64;
-    private const int TLASIndexSize = 4;
-    private const int BLASInstanceSize = 76;
+    private const int BVHNodeSize           = 80;
+    private const int BVHTriSize            = 16;
+    private const int TLASNodeSize          = 64;
+    private const int TLASIndexSize         = 4;
+    private const int BLASInstanceSize      = 76;
 
     public class BVHMesh
     {
         public MeshRenderer meshRenderer;
-        public int blasOffset;
+        
+        public BVH bvh;
         public int triOffset;
         public int triCount;
-
-        public BVH bvh;
-        public bool buildingBVH = false;
     }
     private List<BVHMesh> bvhMeshes = new List<BVHMesh>();
 
@@ -80,23 +78,31 @@ public class BVHScene : MonoBehaviour
         vertexPositionBufferGPU?.Release();
         triangleAttributesBuffer?.Release();
 
+        bvhNodeBuffer?.Release();
+        bvhTriBuffer?.Release();
+        tlasNodeBuffer?.Release();
+        tlasIndexBuffer?.Release();
+        blasInstanceBuffer?.Release();
+
         if (vertexPositionBufferCPU.IsCreated)
         {
             vertexPositionBufferCPU.Dispose();
         }
 
-        foreach(BVHMesh mesh in bvhMeshes)
+        foreach (BVHMesh mesh in bvhMeshes)
         {
             if (mesh.bvh != null)
             {
                 mesh.bvh.Destroy();
             }
         }
+
+        TLAS.DestroyTLAS();
     }
 
     private void ProcessMeshes()
     {
-        totalVertexCount = 0;
+        totalVertexCount   = 0;
         totalTriangleCount = 0;
         bvhMeshes.Clear();
 
@@ -161,10 +167,9 @@ public class BVHScene : MonoBehaviour
 
             BVHMesh bvhMesh = new BVHMesh();
             bvhMesh.meshRenderer = renderer;
+            bvhMesh.bvh          = new BVH();
             bvhMesh.triOffset    = totalTriangleCount;
             bvhMesh.triCount     = triangleCount;
-            bvhMesh.bvh          = new BVH();
-            bvhMesh.buildingBVH  = false;
             bvhMeshes.Add(bvhMesh);
 
             totalTriangleCount += triangleCount;
@@ -217,7 +222,6 @@ public class BVHScene : MonoBehaviour
             foreach (BVHMesh mesh in bvhMeshes)
             {
                 mesh.bvh.Build(dataPointer, mesh.triOffset, mesh.triCount, true);
-                mesh.buildingBVH = true;
             }
 
             TimeSpan bvhTime = DateTime.UtcNow - bvhStartTime;
@@ -251,7 +255,7 @@ public class BVHScene : MonoBehaviour
         // Rebuild TLAS
         if (TLAS.BuildTLAS())
         {
-            int nodesSize = TLAS.GetTLASNodesSize();
+            int nodesSize   = TLAS.GetTLASNodesSize();
             int indicesSize = TLAS.GetTLASIndicesSize();
 
             IntPtr nodesPtr, indicesPtr;
@@ -276,9 +280,7 @@ public class BVHScene : MonoBehaviour
     private bool PrepareBVHBuffers()
     {
         int totalNodeCount = 0;
-        int totalTriCount = 0;
-
-        bool allMeshesReasty = true;
+        int totalTriCount  = 0;
 
         foreach (BVHMesh mesh in bvhMeshes)
         {
@@ -286,37 +288,31 @@ public class BVHScene : MonoBehaviour
             {
                 totalNodeCount += mesh.bvh.GetCWBVHNodesSize() / BVHNodeSize;
                 totalTriCount += mesh.bvh.GetCWBVHTrisSize() / BVHTriSize;
-                mesh.buildingBVH = false;
             } 
             else 
             {
-                allMeshesReasty = false;
+                // Exit until all meshes are ready.
+                return false;
             }
         }
-
-        if (!allMeshesReasty)
-        {
-            return false;
-        }
-
-        blasInstances.Clear();
 
         Utilities.PrepareBuffer(ref bvhNodeBuffer, totalNodeCount, BVHNodeSize, ComputeBufferMode.SubUpdates);
         Utilities.PrepareBuffer(ref bvhTriBuffer, totalTriCount, BVHTriSize, ComputeBufferMode.SubUpdates);
 
         int dstNode = 0;
-        int dstTris = 0;
+        int dstTri  = 0;
+        blasInstances.Clear();
 
         foreach (BVHMesh mesh in bvhMeshes)
         {
             int nodesSize = mesh.bvh.GetCWBVHNodesSize();
-            int trisSize = mesh.bvh.GetCWBVHTrisSize();
+            int trisSize  = mesh.bvh.GetCWBVHTrisSize();
 
             IntPtr nodesPtr, trisPtr;
             if (mesh.bvh.GetCWBVHData(out nodesPtr, out trisPtr))
             {
                 Utilities.UploadFromPointer(ref bvhNodeBuffer, nodesPtr, nodesSize, BVHNodeSize, dstNode);
-                Utilities.UploadFromPointer(ref bvhTriBuffer, trisPtr, trisSize, BVHTriSize, dstTris);
+                Utilities.UploadFromPointer(ref bvhTriBuffer, trisPtr, trisSize, BVHTriSize, dstTri);
             } 
             else
             {
@@ -324,14 +320,14 @@ public class BVHScene : MonoBehaviour
             }
 
             BLASInstance blasInstance = new BLASInstance();
-            blasInstance.invTransform = mesh.meshRenderer.transform.worldToLocalMatrix;
-            blasInstance.bvhNodeOffset = (uint)dstNode;
-            blasInstance.bvhTriOffset = (uint)dstTris;
-            blasInstance.triOffset = (uint)mesh.triOffset;
+            blasInstance.invTransform   = mesh.meshRenderer.transform.worldToLocalMatrix;
+            blasInstance.bvhNodeOffset  = (uint)dstNode;
+            blasInstance.bvhTriOffset   = (uint)dstTri;
+            blasInstance.triOffset      = (uint)mesh.triOffset;
             blasInstances.Add(blasInstance);
 
             dstNode += nodesSize / BVHNodeSize;
-            dstTris += trisSize / BVHTriSize;
+            dstTri += trisSize / BVHTriSize;
         }
 
         return true;
@@ -339,9 +335,8 @@ public class BVHScene : MonoBehaviour
 
     public bool CanRender()
     {
-        return (tlasNodeBuffer != null || tlasIndexBuffer != null || 
-                bvhNodeBuffer != null && bvhTriBuffer != null ||
-                triangleAttributesBuffer != null);
+        return tlasNodeBuffer != null && tlasIndexBuffer != null && blasInstanceBuffer != null &&
+               bvhNodeBuffer != null && bvhTriBuffer != null && triangleAttributesBuffer != null;
     }
 
     public void PrepareShader(CommandBuffer cmd, ComputeShader shader, int kernelIndex)

@@ -12,6 +12,7 @@ struct RayHit
     float t;
     float2 barycentric;
     uint triIndex;
+    uint instIndex;
     uint steps;
 };
 
