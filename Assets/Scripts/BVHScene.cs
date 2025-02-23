@@ -256,6 +256,7 @@ public class BVHScene : MonoBehaviour
             instance.invTransform = localToWorld.inverse;
             blasInstances[i] = instance;
 
+             // Note: tinybvh expects transform matrices in column-major
             mesh.bvh.UpdateTransform(localToWorld.transpose);
         }
 
