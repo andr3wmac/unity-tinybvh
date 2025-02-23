@@ -38,9 +38,9 @@ public class BVHScene : MonoBehaviour
     private const int BVHTriSize = 16;
     private const int TLASNodeSize = 64;
     private const int TLASIndexSize = 4;
-    private const int BLASInstanceSize = 72;
+    private const int BLASInstanceSize = 76;
 
-    class BVHMesh
+    public class BVHMesh
     {
         public MeshRenderer meshRenderer;
         public int blasOffset;
@@ -55,7 +55,8 @@ public class BVHScene : MonoBehaviour
     struct BLASInstance
     {
         public Matrix4x4 invTransform;
-        public uint nodeOffset;
+        public uint bvhNodeOffset;
+        public uint bvhTriOffset;
         public uint triOffset;
     }
     private List<BLASInstance> blasInstances = new List<BLASInstance>();
@@ -176,6 +177,16 @@ public class BVHScene : MonoBehaviour
         AsyncGPUReadback.RequestIntoNativeArray(ref vertexPositionBufferCPU, vertexPositionBufferGPU, OnCompleteReadback);
     }
 
+    public BVHMesh GetMesh(int index)
+    {
+        if (index >= bvhMeshes.Count)
+        {
+            return null;
+        }
+
+        return bvhMeshes[index];
+    }
+
     private unsafe void OnCompleteReadback(AsyncGPUReadbackRequest request)
     {
         if (request.hasError)
@@ -246,6 +257,8 @@ public class BVHScene : MonoBehaviour
             IntPtr nodesPtr, indicesPtr;
             if (TLAS.GetTLASData(out nodesPtr, out indicesPtr))
             {
+                Utilities.PrepareBuffer(ref tlasNodeBuffer, nodesSize / TLASNodeSize, TLASNodeSize);
+                Utilities.PrepareBuffer(ref tlasIndexBuffer, indicesSize / TLASIndexSize, TLASIndexSize);
                 Utilities.UploadFromPointer(ref tlasNodeBuffer, nodesPtr, nodesSize, TLASNodeSize);
                 Utilities.UploadFromPointer(ref tlasIndexBuffer, indicesPtr, indicesSize, TLASIndexSize);
             } 
@@ -253,8 +266,6 @@ public class BVHScene : MonoBehaviour
             {
                 Debug.LogError("Failed to fetch updated TLAS data.");
             }
-
-            //Debug.Log("REBUILD TLAS! Nodes: " + nodesSize + " Indices: " + indicesSize);
         } 
         else 
         {
@@ -314,8 +325,9 @@ public class BVHScene : MonoBehaviour
 
             BLASInstance blasInstance = new BLASInstance();
             blasInstance.invTransform = mesh.meshRenderer.transform.worldToLocalMatrix;
-            blasInstance.nodeOffset = (uint)dstNode;
-            blasInstance.triOffset = (uint)dstTris;
+            blasInstance.bvhNodeOffset = (uint)dstNode;
+            blasInstance.bvhTriOffset = (uint)dstTris;
+            blasInstance.triOffset = (uint)mesh.triOffset;
             blasInstances.Add(blasInstance);
 
             dstNode += nodesSize / BVHNodeSize;
@@ -349,10 +361,6 @@ public class BVHScene : MonoBehaviour
 
     public BVH.Intersection Intersect(Vector3 origin, Vector3 direction, bool useCWBVH = false)
     {
-        BVH.Intersection tlasIntersection = TLAS.Intersect(origin, direction);
-
-        Debug.Log("TLAS Intersection: " + tlasIntersection.prim + " Dist: " + tlasIntersection.t);
-
-        return new BVH.Intersection();
+        return TLAS.IntersectTLAS(origin, direction);
     }
 }

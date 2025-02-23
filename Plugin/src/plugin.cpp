@@ -19,7 +19,11 @@ std::deque<BVHContainer*> gBVHs;
 std::mutex gBVHMutex;
 
 // Optional TLAS
-tinybvh::BVH_GPU* gTLAS = nullptr;
+tinybvh::BVH* gTLAS = nullptr;
+tinybvh::BVH_GPU* gTLASGPU = nullptr;
+std::vector<tinybvh::BLASInstance> gBLASInstances;
+std::vector<tinybvh::BVHBase*> gBLASList;
+std::vector<tinybvh::BVHBase*> gBLASListGPU;
 
 // Adds a bvh to the global list either reusing an empty slot or making a new one.
 int AddBVH(BVHContainer* newBVH)
@@ -165,17 +169,25 @@ bool BuildTLAS()
 {
     std::lock_guard<std::mutex> lock(gBVHMutex);
 
-    std::vector<tinybvh::BLASInstance> gBLASInstances;
-    std::vector<tinybvh::BVHBase*> gBLASList;
+    gBLASInstances.clear();
+    gBLASList.clear();
+    gBLASListGPU.clear();
     
     for (size_t i = 0; i < gBVHs.size(); ++i)
     {
-        if (gBVHs[i] == nullptr || gBVHs[i]->cwbvh == nullptr)
+        if (gBVHs[i] == nullptr)
         {
             continue;
         }
         
-        gBLASList.push_back(gBVHs[i]->cwbvh);
+        if (gBVHs[i]->bvh4CPU != nullptr)
+        {
+            gBLASList.push_back(gBVHs[i]->bvh4CPU);
+        }
+        if (gBVHs[i]->cwbvh != nullptr)
+        {
+            gBLASListGPU.push_back(gBVHs[i]->cwbvh);
+        }
         
         tinybvh::BLASInstance blasInstance(gBLASList.size() - 1);
         memcpy(blasInstance.transform, gBVHs[i]->transform, sizeof(float) * 16);
@@ -184,43 +196,49 @@ bool BuildTLAS()
     
     if (gTLAS == nullptr)
     {
-        gTLAS = new tinybvh::BVH_GPU();
+        gTLAS = new tinybvh::BVH();
+    }
+
+    if (gTLASGPU == nullptr)
+    {
+        gTLASGPU = new tinybvh::BVH_GPU();
     }
 
     gTLAS->Build(gBLASInstances.data(), gBLASInstances.size(), gBLASList.data(), gBLASList.size());
-    
+    gTLASGPU->Build(gBLASInstances.data(), gBLASInstances.size(), gBLASListGPU.data(), gBLASListGPU.size());
+
     return true;
 }
 
 int GetTLASNodesSize()
 {
-    if (gTLAS == nullptr)
+    if (gTLASGPU == nullptr)
     {
         return 0;
     }
     
-    return gTLAS->allocatedNodes * sizeof(tinybvh::BVH_GPU::BVHNode);
+    return gTLASGPU->allocatedNodes * sizeof(tinybvh::BVH_GPU::BVHNode);
 }
 
 int GetTLASIndicesSize()
 {
-    if (gTLAS == nullptr)
+    if (gTLASGPU == nullptr)
     {
         return 0;
     }
     
-    return gTLAS->bvh.idxCount * sizeof(uint32_t);
+    return gTLASGPU->bvh.idxCount * sizeof(uint32_t);
 }
 
 bool GetTLASData(tinybvh::BVH_GPU::BVHNode** bvhNodes, uint32_t** bvhIndices)
 {
-    if (gTLAS == nullptr)
+    if (gTLASGPU == nullptr)
     {
         return false;
     }
     
-    *bvhNodes = gTLAS->bvhNode;
-    *bvhIndices  = gTLAS->bvh.primIdx;
+    *bvhNodes = gTLASGPU->bvhNode;
+    *bvhIndices  = gTLASGPU->bvh.primIdx;
 
     return true;
 }

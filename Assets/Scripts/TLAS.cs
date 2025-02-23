@@ -19,6 +19,6 @@ namespace tinybvh
         public static extern bool GetTLASData(out IntPtr bvhNodes, out IntPtr bvhIndices);
 
         [DllImport("unity-tinybvh-plugin", CallingConvention = CallingConvention.Cdecl)]
-        public static extern BVH.Intersection Intersect(Vector3 origin, Vector3 direction);
+        public static extern BVH.Intersection IntersectTLAS(Vector3 origin, Vector3 direction);
     }
 }

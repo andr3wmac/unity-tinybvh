@@ -9,10 +9,15 @@ namespace tinybvh
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
         public struct Intersection
         {
+            public uint inst;
             public float t;
             public float u;
             public float v;
             public uint prim;
+            public IntPtr auxData;
+
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 56)]
+            public byte[] userData; // Represents the 56-byte union
         }
 
         [DllImport("unity-tinybvh-plugin", CallingConvention = CallingConvention.Cdecl)]

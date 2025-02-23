@@ -118,7 +118,6 @@ public static class Utilities
             NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref srcArray, atomicSafetyHandle);
         #endif
 
-        PrepareBuffer(ref buffer, dataSize / dataStride, dataStride);
         buffer.SetData(srcArray);
 
         #if ENABLE_UNITY_COLLECTIONS_CHECKS
@@ -142,8 +141,7 @@ public static class Utilities
             NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref srcArray, atomicSafetyHandle);
         #endif
 
-        NativeArray<float> dstArray = buffer.BeginWrite<float>(dstOffset / 4, elementCount);
-        //NativeArray<float>.Copy(nativeArray, 0, gpuArray, dstOffset, elementCount);
+        NativeArray<float> dstArray = buffer.BeginWrite<float>((dstOffset * dataStride) / 4, elementCount);
         srcArray.CopyTo(dstArray);
         buffer.EndWrite<float>(elementCount);
 
