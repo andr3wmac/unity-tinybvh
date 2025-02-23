@@ -364,7 +364,7 @@ public class BVHScene : MonoBehaviour
         cmd.SetComputeBufferParam(shader, kernelIndex, "TriangleAttributesBuffer", triangleAttributesBuffer);
     }
 
-    public BVH.Intersection Intersect(Vector3 origin, Vector3 direction, bool useCWBVH = false)
+    public BVH.Intersection Intersect(Vector3 origin, Vector3 direction)
     {
         return TLAS.IntersectTLAS(origin, direction);
     }

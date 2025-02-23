@@ -189,6 +189,7 @@ bool BuildTLAS()
             gBLASListGPU.push_back(gBVHs[i]->cwbvh);
         }
         
+        // Note: with a bit better book keeping we could avoid doing this every frame.
         tinybvh::BLASInstance blasInstance(gBLASList.size() - 1);
         memcpy(blasInstance.transform, gBVHs[i]->transform, sizeof(float) * 16);
         gBLASInstances.push_back(blasInstance);

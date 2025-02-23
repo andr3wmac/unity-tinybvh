@@ -249,7 +249,7 @@ RayHit CastRayTLAS(const Ray ray)
         TLASNode node = TLASNodes[nodeIdx];
 
         if (node.triCount > 0)
-		{
+        {
             // Process leaf node
             for (uint i = 0; i < node.triCount; i++)
             {
@@ -262,8 +262,8 @@ RayHit CastRayTLAS(const Ray ray)
                 // Intersect with CWBVH BLAS
                 RayHit cwbvhHit = CastRayCWBVH(blasRay, inst.bvhNodeOffset, inst.bvhTriOffset);
                 if (cwbvhHit.t < hit.t) 
-				{
-					hit = cwbvhHit;
+                {
+                    hit = cwbvhHit;
                     hit.triIndex = inst.triOffset + hit.triIndex;
                     hit.instIndex = instIdx;
                 }
@@ -281,28 +281,28 @@ RayHit CastRayTLAS(const Ray ray)
             continue;
         }
 
-		// Child AABB intersection tests
-		float3 t1a = (node.lmin.xyz - ray.origin.xyz) * invDir.xyz;
+        // Child AABB intersection tests
+        float3 t1a = (node.lmin.xyz - ray.origin.xyz) * invDir.xyz;
         float3 t2a = (node.lmax.xyz - ray.origin.xyz) * invDir.xyz;
-		float3 t1b = (node.rmin.xyz - ray.origin.xyz) * invDir.xyz;
+        float3 t1b = (node.rmin.xyz - ray.origin.xyz) * invDir.xyz;
         float3 t2b = (node.rmax.xyz - ray.origin.xyz) * invDir.xyz;
-		float3 minta = min(t1a, t2a);
+        float3 minta = min(t1a, t2a);
         float3 maxta = max(t1a, t2a);
-		float3 mintb = min(t1b, t2b);
+        float3 mintb = min(t1b, t2b);
         float3 maxtb = max(t1b, t2b);
-		float tmina = max(max(max(minta.x, minta.y), minta.z), 0);
-		float tminb = max(max(max(mintb.x, mintb.y), mintb.z), 0);
-		float tmaxa = min(min(min(maxta.x, maxta.y), maxta.z), hit.t);
-		float tmaxb = min(min(min(maxtb.x, maxtb.y), maxtb.z), hit.t);
+        float tmina = max(max(max(minta.x, minta.y), minta.z), 0);
+        float tminb = max(max(max(mintb.x, mintb.y), mintb.z), 0);
+        float tmaxa = min(min(min(maxta.x, maxta.y), maxta.z), hit.t);
+        float tmaxb = min(min(min(maxtb.x, maxtb.y), maxtb.z), hit.t);
         float dist1 = tmina > tmaxa ? FarPlane : tmina;
         float dist2 = tminb > tmaxb ? FarPlane : tminb;
 
         uint left = node.left;
         uint right = node.right;
         
-		// Traverse nearest child first
-		if (dist1 > dist2)
-		{
+        // Traverse nearest child first
+        if (dist1 > dist2)
+        {
             SWAP(float, dist1, dist2);
             SWAP(uint, left, right);
         }
@@ -320,7 +320,7 @@ RayHit CastRayTLAS(const Ray ray)
                 nodeIdx = stack[--stackPtr]; 
             }
         }
-		else 
+        else 
         { 
             nodeIdx = left; 
             if (dist2 != FarPlane) 

@@ -176,7 +176,7 @@ public class Raytracer : MonoBehaviour
         Vector3 pos = sourceCamera.transform.position;
         Vector3 dir = sourceCamera.transform.forward;
 
-        tinybvh.BVH.Intersection intersection = bvhScene.Intersect(pos, dir, false);
+        tinybvh.BVH.Intersection intersection = bvhScene.Intersect(pos, dir);
         if (intersection.t < sourceCamera.farClipPlane)
         {
             BVHScene.BVHMesh mesh = bvhScene.GetMesh((int)intersection.inst);
@@ -268,7 +268,7 @@ public class Raytracer : MonoBehaviour
                 Vector3 direction = new Vector3(viewSpacePos.x, viewSpacePos.y, viewSpacePos.z).normalized;
                 direction = CamToWorld.MultiplyVector(direction).normalized;
 
-                tinybvh.BVH.Intersection intersection = bvhScene.Intersect(origin, direction, false);
+                tinybvh.BVH.Intersection intersection = bvhScene.Intersect(origin, direction);
                 if (intersection.t < sourceCamera.farClipPlane)
                 {
                     float dist = 1.0f - (intersection.t / 100.0f);
