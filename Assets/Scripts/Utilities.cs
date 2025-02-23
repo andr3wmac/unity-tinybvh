@@ -17,6 +17,7 @@ public static class Utilities
         public float t;
         public Vector2 barycentric;
         public uint triIndex;
+        public uint instIndex;
         public uint steps;
     };
 
@@ -71,8 +72,16 @@ public static class Utilities
         return result;
     }
 
+    public static void PrepareArray<T>(ref T[] array, int numElements)
+    {
+        if (array == null || array.Length != numElements)
+        {
+            array = new T[numElements];
+        }
+    }
+
     // Ensures the buffer is created and matches the requested count and stride.
-    public static void PrepareBuffer(ref ComputeBuffer buffer, int count, int stride)
+    public static void PrepareBuffer(ref ComputeBuffer buffer, int count, int stride, ComputeBufferMode mode = ComputeBufferMode.Immutable)
     {
         if (buffer != null && (buffer.count != count || buffer.stride != stride))
         {
@@ -82,11 +91,11 @@ public static class Utilities
 
         if (buffer == null)
         {
-            buffer = new ComputeBuffer(count, stride, ComputeBufferType.Structured);
+            buffer = new ComputeBuffer(count, stride, ComputeBufferType.Structured, mode);
         }
     }
 
-    // Ensures the buffer is render texture and matches the requested width, height, and format.
+    // Ensures the render texture is created and matches the requested width, height, and format.
     public static void PrepareRenderTexture(ref RenderTexture texture, int width, int height, RenderTextureFormat format)
     {
         // Check if the texture matches the requested dimensions and format
@@ -107,7 +116,7 @@ public static class Utilities
     // Populates a compute buffer from a native data pointer without copying the data into managed memory
     public unsafe static void UploadFromPointer(ref ComputeBuffer buffer, IntPtr dataPtr, int dataSize, int dataStride)
     {
-        NativeArray<float> nativeArray = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<float>(
+        NativeArray<float> srcArray = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<float>(
             dataPtr.ToPointer(),
             dataSize / 4,
             Allocator.None
@@ -115,11 +124,35 @@ public static class Utilities
 
         #if ENABLE_UNITY_COLLECTIONS_CHECKS
             AtomicSafetyHandle atomicSafetyHandle = AtomicSafetyHandle.Create();
-            NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref nativeArray, atomicSafetyHandle);
+            NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref srcArray, atomicSafetyHandle);
         #endif
 
-        PrepareBuffer(ref buffer, dataSize / dataStride, dataStride);
-        buffer.SetData(nativeArray);
+        buffer.SetData(srcArray);
+
+        #if ENABLE_UNITY_COLLECTIONS_CHECKS
+            AtomicSafetyHandle.CheckDeallocateAndThrow(atomicSafetyHandle);
+            AtomicSafetyHandle.Release(atomicSafetyHandle);
+        #endif
+    }
+
+    public unsafe static void UploadFromPointer(ref ComputeBuffer buffer, IntPtr dataPtr, int dataSize, int dataStride, int dstOffset)
+    {
+        int elementCount = dataSize / 4;
+
+        NativeArray<float> srcArray = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<float>(
+            dataPtr.ToPointer(),
+            elementCount,
+            Allocator.None
+        );
+
+        #if ENABLE_UNITY_COLLECTIONS_CHECKS
+            AtomicSafetyHandle atomicSafetyHandle = AtomicSafetyHandle.Create();
+            NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref srcArray, atomicSafetyHandle);
+        #endif
+
+        NativeArray<float> dstArray = buffer.BeginWrite<float>((dstOffset * dataStride) / 4, elementCount);
+        srcArray.CopyTo(dstArray);
+        buffer.EndWrite<float>(elementCount);
 
         #if ENABLE_UNITY_COLLECTIONS_CHECKS
             AtomicSafetyHandle.CheckDeallocateAndThrow(atomicSafetyHandle);

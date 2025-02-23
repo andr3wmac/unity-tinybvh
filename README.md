@@ -13,6 +13,9 @@ An example implementation for [tinybvh](https://github.com/jbikker/tinybvh) in U
 - **Asynchronous BVH Construction**  
   Uses async readback to transfer mesh data from GPU to CPU, and runs BVH construction in a thread.
 
+- **TLAS Support**  
+  Treats each MeshRenderer as a BLAS and rebuilds a TLAS every frame to support objects with changing transforms.
+
 - **Wavefront Path Tracer**  
   A basic compute based raytracer structured like a wavefront path tracer. Includes multiple display mode examples:
   - **ndotl**
@@ -26,6 +29,4 @@ An example implementation for [tinybvh](https://github.com/jbikker/tinybvh) in U
 
 ## Future Plans
 - Further optimization
-- TLAS/BLAS
-- Moving objects
-- Skinned Mesh Renderer support
+- SkinnedMeshRenderer support

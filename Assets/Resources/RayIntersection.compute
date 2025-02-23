@@ -2,6 +2,19 @@
 
 #include "Common.cginc"
 
+// Nodes in BVH_GPU (2-Wide BVH)
+struct TLASNode
+{
+    float3 lmin; 
+    uint left;
+    float3 lmax; 
+    uint right;
+    float3 rmin; 
+    uint triCount;
+    float3 rmax; 
+    uint firstTri;
+};
+
 // Nodes in CWBVH format.
 struct BVHNode
 {
@@ -12,11 +25,15 @@ struct BVHNode
     float4 n4;
 };
 
+StructuredBuffer<TLASNode> TLASNodes;
+StructuredBuffer<int> TLASIndices;
 StructuredBuffer<BVHNode> BVHNodes;
 StructuredBuffer<float4> BVHTris;
 
 // Stack size for BVH traversal
 #define STACK_SIZE 32
+
+#define SWAP(type, a, b) { type temp = a; a = b; b = temp; }
 
 uint ExtractByte(uint value, uint byteIndex)
 {
@@ -138,7 +155,7 @@ void IntersectTriangle(int triAddr, const Ray ray, inout RayHit hit)
     }
 }
 
-RayHit CastRayCWBVH(const Ray ray)
+RayHit CastRayCWBVH(const Ray ray, uint nodeOffset, uint triOffset)
 {
     RayHit hit = (RayHit) 0;
     hit.t = FarPlane;
@@ -168,7 +185,7 @@ RayHit CastRayCWBVH(const Ray ray)
             
             uint slotIndex = (childBitIndex - 24) ^ (octinv4 & 255);
             uint relativeIndex = countbits(mask & ~(0xFFFFFFFF << slotIndex));
-            uint childNodeIndex = childNodeBaseIndex + relativeIndex;
+            uint childNodeIndex = nodeOffset + childNodeBaseIndex + relativeIndex;
 
             BVHNode node = BVHNodes[childNodeIndex];
             uint hitmask = IntersectCWBVHNode(ray.origin, invDir, octinv4, hit.t, node);
@@ -189,7 +206,7 @@ RayHit CastRayCWBVH(const Ray ray)
         while (triGroup.y != 0)
         {
             int triangleIndex = firstbithigh(triGroup.y);
-            int triAddr = triGroup.x + (triangleIndex * 3);
+            int triAddr = triOffset + triGroup.x + (triangleIndex * 3);
             
             // Check intersection and update hit if its closer
             IntersectTriangle(triAddr, ray, hit);
@@ -215,6 +232,108 @@ RayHit CastRayCWBVH(const Ray ray)
     return hit;
 }
 
+RayHit CastRayTLAS(const Ray ray)
+{
+    RayHit hit = (RayHit)0;
+    hit.t = FarPlane;
+
+    uint nodeIdx = 0;
+    uint stack[STACK_SIZE];
+    uint stackPtr = 0;
+
+    Ray blasRay = ray;
+    float3 invDir = rcp(ray.direction.xyz);
+
+    while (true)
+    {
+        TLASNode node = TLASNodes[nodeIdx];
+
+        if (node.triCount > 0)
+        {
+            // Process leaf node
+            for (uint i = 0; i < node.triCount; i++)
+            {
+                uint instIdx = TLASIndices[node.firstTri + i];
+                BLASInstance inst = BLASInstances[instIdx];
+
+                blasRay.origin = mul(inst.invTransform, float4(ray.origin.xyz, 1.0f)).xyz;
+                blasRay.direction = mul(inst.invTransform, float4(ray.direction.xyz, 0.0f)).xyz;
+
+                // Intersect with CWBVH BLAS
+                RayHit cwbvhHit = CastRayCWBVH(blasRay, inst.bvhNodeOffset, inst.bvhTriOffset);
+                if (cwbvhHit.t < hit.t) 
+                {
+                    hit = cwbvhHit;
+                    hit.triIndex = inst.triOffset + hit.triIndex;
+                    hit.instIndex = instIdx;
+                }
+            }
+            if (stackPtr == 0)
+            {
+                // Traversal complete, exit loop
+                break;
+            }
+            else
+            {
+                // Pop the stack
+                nodeIdx = stack[--stackPtr];
+            }
+            continue;
+        }
+
+        // Child AABB intersection tests
+        float3 t1a = (node.lmin.xyz - ray.origin.xyz) * invDir.xyz;
+        float3 t2a = (node.lmax.xyz - ray.origin.xyz) * invDir.xyz;
+        float3 t1b = (node.rmin.xyz - ray.origin.xyz) * invDir.xyz;
+        float3 t2b = (node.rmax.xyz - ray.origin.xyz) * invDir.xyz;
+        float3 minta = min(t1a, t2a);
+        float3 maxta = max(t1a, t2a);
+        float3 mintb = min(t1b, t2b);
+        float3 maxtb = max(t1b, t2b);
+        float tmina = max(max(max(minta.x, minta.y), minta.z), 0);
+        float tminb = max(max(max(mintb.x, mintb.y), mintb.z), 0);
+        float tmaxa = min(min(min(maxta.x, maxta.y), maxta.z), hit.t);
+        float tmaxb = min(min(min(maxtb.x, maxtb.y), maxtb.z), hit.t);
+        float dist1 = tmina > tmaxa ? FarPlane : tmina;
+        float dist2 = tminb > tmaxb ? FarPlane : tminb;
+
+        uint left = node.left;
+        uint right = node.right;
+        
+        // Traverse nearest child first
+        if (dist1 > dist2)
+        {
+            SWAP(float, dist1, dist2);
+            SWAP(uint, left, right);
+        }
+
+        if (dist1 == FarPlane) 
+        { 
+            if (stackPtr == 0)
+            {
+                // Traversal complete, exit loop
+                break;
+            }  
+            else 
+            {
+                // Pop the stack
+                nodeIdx = stack[--stackPtr]; 
+            }
+        }
+        else 
+        { 
+            nodeIdx = left; 
+            if (dist2 != FarPlane) 
+            {
+                // Push onto stack
+                stack[stackPtr++] = right; 
+            }
+        }
+    }
+
+    return hit;
+}
+
 [numthreads(64, 1, 1)]
 void RayIntersection(uint3 id : SV_DispatchThreadID)
 {
@@ -226,6 +345,6 @@ void RayIntersection(uint3 id : SV_DispatchThreadID)
     const uint rayIndex = id.x;
     
     Ray ray = RayBuffer[rayIndex];
-    RayHit hit = CastRayCWBVH(ray);
+    RayHit hit = CastRayTLAS(ray);
     RayHitBuffer[rayIndex] = hit;
 }

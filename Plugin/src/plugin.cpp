@@ -10,11 +10,20 @@ struct BVHContainer
 {
     tinybvh::BVH4_CPU* bvh4CPU  = nullptr;
     tinybvh::BVH8_CWBVH* cwbvh  = nullptr;
+    
+    float transform[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
 };
 
 // Global container for BVHs and a mutex for thread safety
 std::deque<BVHContainer*> gBVHs;
 std::mutex gBVHMutex;
+
+// Optional TLAS
+tinybvh::BVH* gTLAS = nullptr;
+tinybvh::BVH_GPU* gTLASGPU = nullptr;
+std::vector<tinybvh::BLASInstance> gBLASInstances;
+std::vector<tinybvh::BVHBase*> gBLASList;
+std::vector<tinybvh::BVHBase*> gBLASListGPU;
 
 // Adds a bvh to the global list either reusing an empty slot or making a new one.
 int AddBVH(BVHContainer* newBVH)
@@ -47,17 +56,19 @@ BVHContainer* GetBVH(int index)
     return nullptr;
 }
 
-int BuildBVH(tinybvh::bvhvec4* vertices, int triangleCount, bool buildCWBVH)
+int BuildBVH(tinybvh::bvhvec4* vertices, int startTri, int triangleCount, bool buildCWBVH)
 {
     BVHContainer* container = new BVHContainer();
 
+    tinybvh::bvhvec4* vertexPtr = &vertices[startTri * 3];
+    
     container->bvh4CPU = new tinybvh::BVH4_CPU();
-    container->bvh4CPU->Build(vertices, triangleCount);
-
+    container->bvh4CPU->Build(vertexPtr, triangleCount);
+    
     if (buildCWBVH)
     {
         container->cwbvh = new tinybvh::BVH8_CWBVH();
-        container->cwbvh->Build(vertices, triangleCount);
+        container->cwbvh->Build(vertexPtr, triangleCount);
     }
     
     return AddBVH(container);
@@ -90,6 +101,17 @@ bool IsBVHReady(int index)
 {
     BVHContainer* bvh = GetBVH(index);
     return (bvh != nullptr);
+}
+
+void UpdateTransform(int index, float* transform)
+{
+    BVHContainer* bvh = GetBVH(index);
+    if (bvh == nullptr || bvh->cwbvh == nullptr)
+    {
+        return;
+    }
+    
+    memcpy(bvh->transform, transform, sizeof(float) * 16);
 }
 
 tinybvh::Intersection Intersect(int index, tinybvh::bvhvec3 origin, tinybvh::bvhvec3 direction, bool useCWBVH)
@@ -141,4 +163,114 @@ bool GetCWBVHData(int index, tinybvh::bvhvec4** bvhNodes, tinybvh::bvhvec4** bvh
     }
 
     return false;
+}
+
+bool BuildTLAS()
+{
+    std::lock_guard<std::mutex> lock(gBVHMutex);
+
+    gBLASInstances.clear();
+    gBLASList.clear();
+    gBLASListGPU.clear();
+    
+    for (size_t i = 0; i < gBVHs.size(); ++i)
+    {
+        if (gBVHs[i] == nullptr)
+        {
+            continue;
+        }
+        
+        if (gBVHs[i]->bvh4CPU != nullptr)
+        {
+            gBLASList.push_back(gBVHs[i]->bvh4CPU);
+        }
+        if (gBVHs[i]->cwbvh != nullptr)
+        {
+            gBLASListGPU.push_back(gBVHs[i]->cwbvh);
+        }
+        
+        // Note: with a bit better book keeping we could avoid doing this every frame.
+        tinybvh::BLASInstance blasInstance(gBLASList.size() - 1);
+        memcpy(blasInstance.transform, gBVHs[i]->transform, sizeof(float) * 16);
+        gBLASInstances.push_back(blasInstance);
+    }
+    
+    if (gTLAS == nullptr)
+    {
+        gTLAS = new tinybvh::BVH();
+    }
+
+    if (gTLASGPU == nullptr)
+    {
+        gTLASGPU = new tinybvh::BVH_GPU();
+    }
+
+    gTLAS->Build(gBLASInstances.data(), gBLASInstances.size(), gBLASList.data(), gBLASList.size());
+    gTLASGPU->Build(gBLASInstances.data(), gBLASInstances.size(), gBLASListGPU.data(), gBLASListGPU.size());
+
+    return true;
+}
+
+void DestroyTLAS()
+{
+    gBLASInstances.clear();
+    gBLASList.clear();
+    gBLASListGPU.clear();
+    
+    if (gTLAS != nullptr)
+    {
+        delete gTLAS;
+        gTLAS = nullptr;
+    }
+
+    if (gTLASGPU != nullptr)
+    {
+        delete gTLASGPU;
+        gTLASGPU = nullptr;
+    }
+}
+
+int GetTLASNodesSize()
+{
+    if (gTLASGPU == nullptr)
+    {
+        return 0;
+    }
+    
+    return gTLASGPU->allocatedNodes * sizeof(tinybvh::BVH_GPU::BVHNode);
+}
+
+int GetTLASIndicesSize()
+{
+    if (gTLASGPU == nullptr)
+    {
+        return 0;
+    }
+    
+    return gTLASGPU->bvh.idxCount * sizeof(uint32_t);
+}
+
+bool GetTLASData(tinybvh::BVH_GPU::BVHNode** bvhNodes, uint32_t** bvhIndices)
+{
+    if (gTLASGPU == nullptr)
+    {
+        return false;
+    }
+    
+    *bvhNodes = gTLASGPU->bvhNode;
+    *bvhIndices  = gTLASGPU->bvh.primIdx;
+
+    return true;
+}
+
+tinybvh::Intersection IntersectTLAS(tinybvh::bvhvec3 origin, tinybvh::bvhvec3 direction)
+{
+    if (gTLAS == nullptr)
+    {
+        return tinybvh::Intersection();
+    }
+    
+    tinybvh::Ray ray(origin, direction);
+    gTLAS->Intersect(ray);
+    return ray.hit;
 }

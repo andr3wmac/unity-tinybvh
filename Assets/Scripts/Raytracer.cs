@@ -45,7 +45,7 @@ public class Raytracer : MonoBehaviour
 
     // Struct sizes in bytes
     private const int RayStructSize = 24;
-    private const int RayHitStructSize = 20;
+    private const int RayHitStructSize = 24;
 
     void Start()
     {
@@ -176,18 +176,23 @@ public class Raytracer : MonoBehaviour
         Vector3 pos = sourceCamera.transform.position;
         Vector3 dir = sourceCamera.transform.forward;
 
-        tinybvh.BVH bvh = bvhScene.GetBVH();
-        tinybvh.BVH.Intersection intersection = bvh.Intersect(pos, dir, false);
-
-        Debug.Log("Ray Hit Distance: " + intersection.t + ", Triangle Index: " + intersection.prim);
-        Debug.DrawLine(pos, pos + (dir * intersection.t), Color.red, 10.0f);
+        tinybvh.BVH.Intersection intersection = bvhScene.Intersect(pos, dir);
+        if (intersection.t < sourceCamera.farClipPlane)
+        {
+            BVHScene.BVHMesh mesh = bvhScene.GetMesh((int)intersection.inst);
+            Debug.Log("Ray Hit: " + mesh.meshRenderer.name + "(" + intersection.inst + "). Distance: " + intersection.t + ", Triangle Index: " + intersection.prim);
+            Debug.DrawLine(pos, pos + (dir * intersection.t), Color.red, 10.0f);
+        } 
+        else
+        {
+            Debug.Log("Ray did not hit anything.");
+        }
     }
 
     [ContextMenu("Debug/Cast Ray GPU")]
     private void DebugCastRayGPU()
     {
         CommandBuffer debugCmd = new CommandBuffer();
-
         ComputeBuffer debugRayBuffer = new ComputeBuffer(1, RayStructSize, ComputeBufferType.Structured);
         ComputeBuffer debugRayHitBuffer = new ComputeBuffer(1, RayHitStructSize, ComputeBufferType.Structured);
 
@@ -203,9 +208,11 @@ public class Raytracer : MonoBehaviour
         debugRayBuffer.SetData(debugRays);
 
         // Execute ray intersection shader
+        bvhScene.PrepareShader(debugCmd, rayIntersectionShader, 0);
         debugCmd.SetComputeFloatParam(rayIntersectionShader, "FarPlane", sourceCamera.farClipPlane);
         debugCmd.SetComputeIntParam(rayIntersectionShader, "OutputWidth", 1);
         debugCmd.SetComputeIntParam(rayIntersectionShader, "OutputHeight", 1);
+        debugCmd.SetComputeIntParam(rayIntersectionShader, "TotalRays", 1);
         debugCmd.SetComputeBufferParam(rayIntersectionShader, 0, "RayBuffer", debugRayBuffer);
         debugCmd.SetComputeBufferParam(rayIntersectionShader, 0, "RayHitBuffer", debugRayHitBuffer);
         debugCmd.DispatchCompute(rayIntersectionShader, 0, 1, 1, 1);
@@ -216,9 +223,18 @@ public class Raytracer : MonoBehaviour
         // Read back hit
         Utilities.DebugRayHit[] debugRayHits = new Utilities.DebugRayHit[1];
         debugRayHitBuffer.GetData(debugRayHits);
+        Utilities.DebugRayHit hit = debugRayHits[0];
 
-        Debug.Log("Ray Hit Distance: " + debugRayHits[0].t + ", Triangle Index: " + debugRayHits[0].triIndex);
-        Debug.DrawLine(pos, pos + (dir * debugRayHits[0].t), Color.red, 10.0f);
+        if (hit.t < sourceCamera.farClipPlane)
+        {
+            BVHScene.BVHMesh mesh = bvhScene.GetMesh((int)hit.instIndex);
+            Debug.Log("Ray Hit: " + mesh.meshRenderer.name + "(" + hit.instIndex + "). Distance: " + hit.t + ", Triangle Index: " + hit.triIndex);
+            Debug.DrawLine(pos, pos + (dir * hit.t), Color.red, 10.0f);
+        } 
+        else
+        {
+            Debug.Log("Ray did not hit anything.");
+        }
 
         debugRayBuffer.Release();
         debugRayHitBuffer.Release();
@@ -227,14 +243,15 @@ public class Raytracer : MonoBehaviour
     [ContextMenu("Debug/Trace Scene CPU")]
     private void DebugTraceSceneCPU()
     {
+        outputWidth  = sourceCamera.scaledPixelWidth;
+        outputHeight = sourceCamera.scaledPixelHeight;
+
         Texture2D texture = new Texture2D(outputWidth, outputHeight, TextureFormat.RGBA32, false);
         Color[] pixels = new Color[outputWidth * outputHeight];
 
         Matrix4x4 CamInvProj = sourceCamera.projectionMatrix.inverse;
         Matrix4x4 CamToWorld = sourceCamera.cameraToWorldMatrix;
 
-        tinybvh.BVH bvh = bvhScene.GetBVH();
-        
         for (int y = 0; y < outputHeight; y++)
         {
             for (int x = 0; x < outputWidth; x++)
@@ -251,7 +268,7 @@ public class Raytracer : MonoBehaviour
                 Vector3 direction = new Vector3(viewSpacePos.x, viewSpacePos.y, viewSpacePos.z).normalized;
                 direction = CamToWorld.MultiplyVector(direction).normalized;
 
-                tinybvh.BVH.Intersection intersection = bvh.Intersect(origin, direction, false);
+                tinybvh.BVH.Intersection intersection = bvhScene.Intersect(origin, direction);
                 if (intersection.t < sourceCamera.farClipPlane)
                 {
                     float dist = 1.0f - (intersection.t / 100.0f);
