@@ -36,27 +36,47 @@ void RayShading(uint3 id : SV_DispatchThreadID)
         Output[pixelCoords] = float4(0.0f, 0.0f, 0.0f, 0.0f);
         return;
     }
-    
+
     #if OUTPUT_NDOTL
+    {
+        BLASInstance inst = BLASInstances[hit.instIndex];
         TriangleAttributes triAttr = TriangleAttributesBuffer[hit.triIndex];
+
         float3 normal = InterpolateAttribute(hit.barycentric, triAttr.normal0, triAttr.normal1, triAttr.normal2);
+        normal = mul(inst.transform, float4(normal.xyz, 0.0)).xyz;
+
         float ndotl = max(dot(normalize(normal), LightDirection.xyz), 0.0);
         Output[pixelCoords] = float4(ndotl * LightColor.rgb, 1.0f);
+    }
     #elif OUTPUT_BVH_STEPS
+    {
         Output[pixelCoords] = float4(hit.steps / 43.0f, hit.steps > 80, 0.0f, 1.0f);
+    }
     #elif OUTPUT_BARYCENTRICS
+    {
         Output[pixelCoords] = float4(hit.barycentric, 0.0f, 1.0f);
+    }
     #elif OUTPUT_NORMALS
+    {
+        BLASInstance inst = BLASInstances[hit.instIndex];
         TriangleAttributes triAttr = TriangleAttributesBuffer[hit.triIndex];
+
         float3 normal = InterpolateAttribute(hit.barycentric, triAttr.normal0, triAttr.normal1, triAttr.normal2);
+        normal = mul(inst.transform, float4(normal.xyz, 0.0)).xyz;
+        
         Output[pixelCoords] = float4(normalize(normal).xyz, 1.0f);
+    }
     #elif OUTPUT_UVS
+    {
         TriangleAttributes triAttr = TriangleAttributesBuffer[hit.triIndex];
         float2 uv = InterpolateAttribute(hit.barycentric, triAttr.uv0, triAttr.uv1, triAttr.uv2);
         Output[pixelCoords] = float4(uv.xy, 0.0f, 1.0f);
+    }
     #else
+    {
         // Ray Distance
         float normDist = hit.t / 100.0f;
         Output[pixelCoords] = float4(normDist, normDist, normDist, 1.0f);
+    }
     #endif
 }

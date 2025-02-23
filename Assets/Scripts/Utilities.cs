@@ -72,6 +72,14 @@ public static class Utilities
         return result;
     }
 
+    public static void PrepareArray<T>(ref T[] array, int numElements)
+    {
+        if (array == null || array.Length != numElements)
+        {
+            array = new T[numElements];
+        }
+    }
+
     // Ensures the buffer is created and matches the requested count and stride.
     public static void PrepareBuffer(ref ComputeBuffer buffer, int count, int stride, ComputeBufferMode mode = ComputeBufferMode.Immutable)
     {

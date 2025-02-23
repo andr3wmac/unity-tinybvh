@@ -15,14 +15,6 @@ struct TLASNode
     uint firstTri;
 };
 
-struct BLASInstance
-{
-    float4x4 invTransform;
-    uint bvhNodeOffset;
-    uint bvhTriOffset;
-    uint triOffset;
-};
-
 // Nodes in CWBVH format.
 struct BVHNode
 {
@@ -35,7 +27,6 @@ struct BVHNode
 
 StructuredBuffer<TLASNode> TLASNodes;
 StructuredBuffer<int> TLASIndices;
-StructuredBuffer<BLASInstance> BLASInstances;
 StructuredBuffer<BVHNode> BVHNodes;
 StructuredBuffer<float4> BVHTris;
 

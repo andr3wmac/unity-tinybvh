@@ -38,7 +38,7 @@ public class BVHScene : MonoBehaviour
     private const int BVHTriSize            = 16;
     private const int TLASNodeSize          = 64;
     private const int TLASIndexSize         = 4;
-    private const int BLASInstanceSize      = 76;
+    private const int BLASInstanceSize      = 140;
 
     public class BVHMesh
     {
@@ -52,12 +52,13 @@ public class BVHScene : MonoBehaviour
 
     struct BLASInstance
     {
+        public Matrix4x4 transform;
         public Matrix4x4 invTransform;
         public uint bvhNodeOffset;
         public uint bvhTriOffset;
         public uint triOffset;
     }
-    private List<BLASInstance> blasInstances = new List<BLASInstance>();
+    private BLASInstance[] blasInstances;
 
     void Start()
     {
@@ -245,12 +246,21 @@ public class BVHScene : MonoBehaviour
         }
 
         // Update transforms
-        foreach (BVHMesh mesh in bvhMeshes)
+        for (int i = 0; i < bvhMeshes.Count; ++i)
         {
-            mesh.bvh.UpdateTransform(mesh.meshRenderer.transform.localToWorldMatrix.transpose);
+            BVHMesh mesh = bvhMeshes[i];
+            Matrix4x4 localToWorld = mesh.meshRenderer.localToWorldMatrix;
+
+            BLASInstance instance = blasInstances[i];
+            instance.transform    = localToWorld;
+            instance.invTransform = localToWorld.inverse;
+            blasInstances[i] = instance;
+
+            mesh.bvh.UpdateTransform(localToWorld.transpose);
         }
-        Utilities.PrepareBuffer(ref blasInstanceBuffer, blasInstances.Count, BLASInstanceSize);
-        blasInstanceBuffer.SetData(blasInstances.ToArray());
+
+        Utilities.PrepareBuffer(ref blasInstanceBuffer, blasInstances.Length, BLASInstanceSize);
+        blasInstanceBuffer.SetData(blasInstances);
 
         // Rebuild TLAS
         if (TLAS.BuildTLAS())
@@ -298,13 +308,13 @@ public class BVHScene : MonoBehaviour
 
         Utilities.PrepareBuffer(ref bvhNodeBuffer, totalNodeCount, BVHNodeSize, ComputeBufferMode.SubUpdates);
         Utilities.PrepareBuffer(ref bvhTriBuffer, totalTriCount, BVHTriSize, ComputeBufferMode.SubUpdates);
+        Utilities.PrepareArray(ref blasInstances, bvhMeshes.Count);
 
         int dstNode = 0;
         int dstTri  = 0;
-        blasInstances.Clear();
-
-        foreach (BVHMesh mesh in bvhMeshes)
+        for (int i = 0; i < bvhMeshes.Count; ++i)
         {
+            BVHMesh mesh = bvhMeshes[i];
             int nodesSize = mesh.bvh.GetCWBVHNodesSize();
             int trisSize  = mesh.bvh.GetCWBVHTrisSize();
 
@@ -324,7 +334,7 @@ public class BVHScene : MonoBehaviour
             blasInstance.bvhNodeOffset  = (uint)dstNode;
             blasInstance.bvhTriOffset   = (uint)dstTri;
             blasInstance.triOffset      = (uint)mesh.triOffset;
-            blasInstances.Add(blasInstance);
+            blasInstances[i] = blasInstance;
 
             dstNode += nodesSize / BVHNodeSize;
             dstTri += trisSize / BVHTriSize;

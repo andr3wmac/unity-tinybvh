@@ -28,10 +28,20 @@ struct TriangleAttributes
     float2 uv2;
 };
 
+struct BLASInstance
+{
+    float4x4 transform;
+    float4x4 invTransform;
+    uint bvhNodeOffset;
+    uint bvhTriOffset;
+    uint triOffset;
+};
+
 uint TotalRays;
 RWStructuredBuffer<Ray> RayBuffer;
 RWStructuredBuffer<RayHit> RayHitBuffer;
 RWStructuredBuffer<TriangleAttributes> TriangleAttributesBuffer;
+StructuredBuffer<BLASInstance> BLASInstances;
 
 float FarPlane;
 uint OutputWidth;
