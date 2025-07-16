@@ -39,15 +39,8 @@ float2 ReadVertexUV(uint vertexIndex)
     return asfloat(uvData);
 }
 
-[numthreads(64, 1, 1)]
-void ProcessMesh(uint3 id : SV_DispatchThreadID)
+uint3 ReadTriangle(uint triIndex)
 {
-    uint triIndex = id.x;
-    if (triIndex >= TriangleCount)
-    {
-        return;
-    }
-    
     uint3 vertIndices;
     
     #if HAS_32_BIT_INDICES
@@ -62,9 +55,23 @@ void ProcessMesh(uint3 id : SV_DispatchThreadID)
         uint offsetInWord = byteOffset % 4;
     
         vertIndices.x = (offsetInWord == 0) ? (packedWords.x & 0xFFFF) : (packedWords.x >> 16);
-        vertIndices.y = (offsetInWord == 0) ? (packedWords.x >> 16)    : (packedWords.y & 0xFFFF);
+        vertIndices.y = (offsetInWord == 0) ? (packedWords.x >> 16) : (packedWords.y & 0xFFFF);
         vertIndices.z = (offsetInWord == 0) ? (packedWords.y & 0xFFFF) : (packedWords.y >> 16);
     #endif
+    
+    return vertIndices;
+}
+
+[numthreads(64, 1, 1)]
+void ProcessMesh(uint3 id : SV_DispatchThreadID)
+{
+    uint triIndex = id.x;
+    if (triIndex >= TriangleCount)
+    {
+        return;
+    }
+    
+    uint3 vertIndices = ReadTriangle(triIndex);
     
     float3 vert0 = ReadVertexPosition(vertIndices.x);
     float3 vert1 = ReadVertexPosition(vertIndices.y);
