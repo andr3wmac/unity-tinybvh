@@ -61,7 +61,7 @@ int BuildBVH(tinybvh::bvhvec4* vertices, int startTri, int triangleCount, bool b
     BVHContainer* container = new BVHContainer();
 
     tinybvh::bvhvec4* vertexPtr = &vertices[startTri * 3];
-    
+
     container->bvh4CPU = new tinybvh::BVH4_CPU();
     container->bvh4CPU->Build(vertexPtr, triangleCount);
     
@@ -190,8 +190,8 @@ bool BuildTLAS()
         }
         
         // Note: with a bit better book keeping we could avoid doing this every frame.
-        tinybvh::BLASInstance blasInstance(gBLASList.size() - 1);
-        memcpy(blasInstance.transform, gBVHs[i]->transform, sizeof(float) * 16);
+        tinybvh::BLASInstance blasInstance(gBLASInstances.size());
+        memcpy(&blasInstance.transform, gBVHs[i]->transform, sizeof(float) * 16);
         gBLASInstances.push_back(blasInstance);
     }
     
