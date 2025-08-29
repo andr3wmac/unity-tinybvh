@@ -61,9 +61,9 @@ int BuildBVH(tinybvh::bvhvec4* vertices, int startTri, int triangleCount, bool b
     BVHContainer* container = new BVHContainer();
 
     tinybvh::bvhvec4* vertexPtr = &vertices[startTri * 3];
-    
-    //container->bvh4CPU = new tinybvh::BVH4_CPU();
-    //container->bvh4CPU->Build(vertexPtr, triangleCount);
+
+    container->bvh4CPU = new tinybvh::BVH4_CPU();
+    container->bvh4CPU->Build(vertexPtr, triangleCount);
     
     if (buildCWBVH)
     {
@@ -86,10 +86,10 @@ void DestroyBVH(int index)
                 delete gBVHs[index]->cwbvh;
             }
 
-            //if (gBVHs[index]->bvh4CPU != nullptr)
-            //{
-            //    delete gBVHs[index]->bvh4CPU;
-            //}
+            if (gBVHs[index]->bvh4CPU != nullptr)
+            {
+                delete gBVHs[index]->bvh4CPU;
+            }
 
             delete gBVHs[index];
             gBVHs[index] = nullptr;
@@ -128,7 +128,7 @@ tinybvh::Intersection Intersect(int index, tinybvh::bvhvec3 origin, tinybvh::bvh
         }
         else 
         {
-            //bvh->bvh4CPU->Intersect(ray);
+            bvh->bvh4CPU->Intersect(ray);
         }
         return ray.hit;
     }
@@ -180,10 +180,10 @@ bool BuildTLAS()
             continue;
         }
         
-        //if (gBVHs[i]->bvh4CPU != nullptr)
-        //{
-            //gBLASList.push_back(gBVHs[i]->bvh4CPU);
-        //}
+        if (gBVHs[i]->bvh4CPU != nullptr)
+        {
+            gBLASList.push_back(gBVHs[i]->bvh4CPU);
+        }
         if (gBVHs[i]->cwbvh != nullptr)
         {
             gBLASListGPU.push_back(gBVHs[i]->cwbvh);
