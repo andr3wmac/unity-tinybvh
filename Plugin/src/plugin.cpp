@@ -22,6 +22,7 @@ std::mutex gBVHMutex;
 tinybvh::BVH* gTLAS = nullptr;
 tinybvh::BVH_GPU* gTLASGPU = nullptr;
 std::vector<tinybvh::BLASInstance> gBLASInstances;
+std::vector<tinybvh::BLASInstance> gBLASInstancesGPU;
 std::vector<tinybvh::BVHBase*> gBLASList;
 std::vector<tinybvh::BVHBase*> gBLASListGPU;
 
@@ -58,6 +59,11 @@ BVHContainer* GetBVH(int index)
 
 int BuildBVH(tinybvh::bvhvec4* vertices, int startTri, int triangleCount, bool buildCWBVH)
 {
+    if (vertices == nullptr || startTri < 0 || triangleCount <= 0)
+    {
+        return -1;
+    }
+
     BVHContainer* container = new BVHContainer();
 
     tinybvh::bvhvec4* vertexPtr = &vertices[startTri * 3];
@@ -106,7 +112,7 @@ bool IsBVHReady(int index)
 void UpdateTransform(int index, float* transform)
 {
     BVHContainer* bvh = GetBVH(index);
-    if (bvh == nullptr || bvh->cwbvh == nullptr)
+    if (bvh == nullptr || transform == nullptr)
     {
         return;
     }
@@ -124,6 +130,8 @@ tinybvh::Intersection Intersect(int index, tinybvh::bvhvec3 origin, tinybvh::bvh
         {
             #ifdef BVH_USEAVX
             bvh->cwbvh->Intersect(ray);
+            #else
+            bvh->bvh4CPU->Intersect(ray);
             #endif
         }
         else 
@@ -170,6 +178,7 @@ bool BuildTLAS()
     std::lock_guard<std::mutex> lock(gBVHMutex);
 
     gBLASInstances.clear();
+    gBLASInstancesGPU.clear();
     gBLASList.clear();
     gBLASListGPU.clear();
     
@@ -180,19 +189,30 @@ bool BuildTLAS()
             continue;
         }
         
-        if (gBVHs[i]->bvh4CPU != nullptr)
+        BVHContainer* bvh = gBVHs[i];
+        if (bvh->bvh4CPU != nullptr)
         {
-            gBLASList.push_back(gBVHs[i]->bvh4CPU);
+            tinybvh::BLASInstance blasInstance((uint32_t)gBLASList.size());
+            memcpy(&blasInstance.transform, bvh->transform, sizeof(float) * 16);
+
+            gBLASList.push_back(bvh->bvh4CPU);
+            gBLASInstances.push_back(blasInstance);
         }
-        if (gBVHs[i]->cwbvh != nullptr)
+
+        if (bvh->cwbvh != nullptr)
         {
-            gBLASListGPU.push_back(gBVHs[i]->cwbvh);
+            tinybvh::BLASInstance blasInstance((uint32_t)gBLASListGPU.size());
+            memcpy(&blasInstance.transform, bvh->transform, sizeof(float) * 16);
+
+            gBLASListGPU.push_back(bvh->cwbvh);
+            gBLASInstancesGPU.push_back(blasInstance);
         }
-        
-        // Note: with a bit better book keeping we could avoid doing this every frame.
-        tinybvh::BLASInstance blasInstance(gBLASInstances.size());
-        memcpy(&blasInstance.transform, gBVHs[i]->transform, sizeof(float) * 16);
-        gBLASInstances.push_back(blasInstance);
+    }
+
+    if (gBLASInstances.empty())
+    {
+        DestroyTLAS();
+        return false;
     }
     
     if (gTLAS == nullptr)
@@ -205,15 +225,27 @@ bool BuildTLAS()
         gTLASGPU = new tinybvh::BVH_GPU();
     }
 
-    gTLAS->Build(gBLASInstances.data(), gBLASInstances.size(), gBLASList.data(), gBLASList.size());
-    gTLASGPU->Build(gBLASInstances.data(), gBLASInstances.size(), gBLASListGPU.data(), gBLASListGPU.size());
+    gTLAS->Build(gBLASInstances.data(), (uint32_t)gBLASInstances.size(), gBLASList.data(), (uint32_t)gBLASList.size());
+
+    if (gBLASInstancesGPU.size() != gBLASInstances.size())
+    {
+        if (gTLASGPU != nullptr)
+        {
+            delete gTLASGPU;
+            gTLASGPU = nullptr;
+        }
+        return false;
+    }
+
+    gTLASGPU->Build(gBLASInstancesGPU.data(), (uint32_t)gBLASInstancesGPU.size(), gBLASListGPU.data(), (uint32_t)gBLASListGPU.size());
 
     return true;
 }
 
-void DestroyTLAS()
+bool DestroyTLAS()
 {
     gBLASInstances.clear();
+    gBLASInstancesGPU.clear();
     gBLASList.clear();
     gBLASListGPU.clear();
     
@@ -228,6 +260,8 @@ void DestroyTLAS()
         delete gTLASGPU;
         gTLASGPU = nullptr;
     }
+
+    return true;
 }
 
 int GetTLASNodesSize()
