@@ -152,7 +152,7 @@ int GetCWBVHNodesSize(int index)
 int GetCWBVHTrisSize(int index) 
 {
     BVHContainer* bvh = GetBVH(index);
-    return (bvh != nullptr && bvh->cwbvh != nullptr) ? bvh->cwbvh->triCount * 3 * 16 : 0;
+    return (bvh != nullptr && bvh->cwbvh != nullptr) ? bvh->cwbvh->usedTriBlocks * sizeof(tinybvh::bvhvec4) : 0;
 }
 
 bool GetCWBVHData(int index, tinybvh::bvhvec4** bvhNodes, tinybvh::bvhvec4** bvhTris) 
