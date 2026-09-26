@@ -6,9 +6,9 @@
 struct TLASNode
 {
     float3 lmin; 
-    uint left;
+    uint left;      // Interior node index or packed leaf reference.
     float3 lmax; 
-    uint right;
+    uint right;     // Bit 31: leaf. Bits 24..30: count. bits 0..23: index offset.
     float3 rmin; 
     uint triCount;
     float3 rmax; 
@@ -59,15 +59,11 @@ float3 GetNodeInvDir(float n0w, float3 invDir)
 {
     uint packed = asuint(n0w);
 
-    // Extract each byte and sign extend
-    uint e_x = (ExtractByte(packed, 0) ^ 0x80) - 0x80;
-    uint e_y = (ExtractByte(packed, 1) ^ 0x80) - 0x80;
-    uint e_z = (ExtractByte(packed, 2) ^ 0x80) - 0x80;
-
+    // TinyBVH 1.9 stores the IEEE exponent bias in each byte already.
     return float3(
-        asfloat((e_x + 127) << 23) * invDir.x,
-        asfloat((e_y + 127) << 23) * invDir.y,
-        asfloat((e_z + 127) << 23) * invDir.z
+        asfloat(ExtractByte(packed, 0) << 23) * invDir.x,
+        asfloat(ExtractByte(packed, 1) << 23) * invDir.y,
+        asfloat(ExtractByte(packed, 2) << 23) * invDir.z
     );
 }
 
@@ -122,37 +118,34 @@ uint IntersectCWBVHNode(float3 origin, float3 invDir, uint octinv4, float tmax, 
 
 void IntersectTriangle(int triAddr, const Ray ray, inout RayHit hit)
 {
-    float3 e1 = BVHTris[triAddr + 0].xyz;
-    float3 e2 = BVHTris[triAddr + 1].xyz;
-    float4 v0 = BVHTris[triAddr + 2];
-    
-    float3 r = cross(ray.direction.xyz, e1);
-    float a = dot(e2, r);
-            
-    if (abs(a) > 0.0000001f)
+    // TinyBVH 1.9 CWBVH_COMPRESSED_TRIS: coordinate transformation coefficients.
+    float4 T2 = BVHTris[triAddr + 2];
+    float transD = dot(T2.xyz, ray.direction);
+    if (transD == 0.0f)
     {
-        float f = 1.0f / a;
-        float3 s = ray.origin.xyz - v0.xyz;
-        float u = f * dot(s, r);
-        
-        if (u >= 0.0f && u <= 1.0f)
-        {
-            float3 q = cross(s, e2);
-            float v = f * dot(ray.direction.xyz, q);
-            
-            if (v >= 0.0f && u + v <= 1.0f)
-            {
-                float d = f * dot(e1, q);
-                
-                if (d > 0.0f && d < hit.t)
-                {
-                    hit.t = d;
-                    hit.barycentric = float2(u, v);
-                    hit.triIndex = asuint(v0.w);
-                }
-            }
-        }
+        return;
     }
+
+    float transS = dot(T2.xyz, ray.origin) + T2.w;
+    float d = -transS / transD;
+    if (!(d > 0.0f && d < hit.t))
+    {
+        return;
+    }
+
+    float4 T0 = BVHTris[triAddr + 0];
+    float4 T1 = BVHTris[triAddr + 1];
+    float3 intersection = ray.origin + d * ray.direction;
+    float u = dot(T0.xyz, intersection) + T0.w;
+    float v = dot(T1.xyz, intersection) + T1.w;
+    if (!(u >= 0.0f && v >= 0.0f && u + v <= 1.0f))
+    {
+        return;
+    }
+
+    hit.t = d;
+    hit.barycentric = float2(u, v);
+    hit.triIndex = asuint(BVHTris[triAddr + 3].w);
 }
 
 RayHit CastRayCWBVH(const Ray ray, uint nodeOffset, uint triOffset)
@@ -206,7 +199,7 @@ RayHit CastRayCWBVH(const Ray ray, uint nodeOffset, uint triOffset)
         while (triGroup.y != 0)
         {
             int triangleIndex = firstbithigh(triGroup.y);
-            int triAddr = triOffset + triGroup.x + (triangleIndex * 3);
+            int triAddr = triOffset + triGroup.x + (triangleIndex * 4);
             
             // Check intersection and update hit if its closer
             IntersectTriangle(triAddr, ray, hit);
@@ -246,14 +239,14 @@ RayHit CastRayTLAS(const Ray ray)
 
     while (true)
     {
-        TLASNode node = TLASNodes[nodeIdx];
-
-        if (node.triCount > 0)
+        if ((nodeIdx & 0x80000000u) != 0)
         {
-            // Process leaf node
-            for (uint i = 0; i < node.triCount; i++)
+            // TinyBVH 1.9 stores leaf metadata in the child reference itself.
+            uint triCount = (nodeIdx >> 24) & 0x7Fu;
+            uint firstTri = nodeIdx & 0x00FFFFFFu;
+            for (uint i = 0; i < triCount; i++)
             {
-                uint instIdx = TLASIndices[node.firstTri + i];
+                uint instIdx = TLASIndices[firstTri + i];
                 BLASInstance inst = BLASInstances[instIdx];
 
                 blasRay.origin = mul(inst.invTransform, float4(ray.origin.xyz, 1.0f)).xyz;
@@ -280,6 +273,8 @@ RayHit CastRayTLAS(const Ray ray)
             }
             continue;
         }
+
+        TLASNode node = TLASNodes[nodeIdx];
 
         // Child AABB intersection tests
         float3 t1a = (node.lmin.xyz - ray.origin.xyz) * invDir.xyz;
